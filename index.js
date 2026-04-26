@@ -89,6 +89,7 @@ app.post("/webhook", (req, res, next) => {
 }, async (req, res) => {
   res.status(200).json({ status: "ok" });
 
+
   const events = req.body.events;
   for (const event of events) {
     try {
