@@ -81,8 +81,6 @@ async function getName(userId) {
   } catch { return "ลูกค้า"; }
 }
 
-// ===== รับ raw body สำหรับ verify signature =====
-app.use("/webhook", express.raw({ type: "application/json" }));
 app.use(express.json());
 
 // ===== Webhook =====
@@ -91,17 +89,7 @@ app.post("/webhook", async (req, res) => {
   res.status(200).json({ status: "ok" });
 
   try {
-    // Verify signature
-    const sig = req.headers["x-line-signature"];
-    const body = req.body;
-    const hash = crypto.createHmac("sha256", LINE_SECRET)
-      .update(body).digest("base64");
-    if (sig !== hash) {
-      console.log("Signature mismatch - skipping");
-      return;
-    }
-
-    const parsed = JSON.parse(body);
+    const parsed = req.body;
     const events = parsed.events || [];
 
     for (const event of events) {
