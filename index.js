@@ -78,7 +78,15 @@ async function getAIResponse(userMessage, userName) {
 }
 
 // ===== Webhook Handler =====
-app.post("/webhook", middleware(lineConfig), async (req, res) => {
+app.post("/webhook", (req, res, next) => {
+  middleware(lineConfig)(req, res, (err) => {
+    if (err) {
+      console.error("Middleware error:", err.message);
+      return res.status(200).json({ status: "ok" });
+    }
+    next();
+  });
+}, async (req, res) => {
   res.status(200).json({ status: "ok" });
 
   const events = req.body.events;
