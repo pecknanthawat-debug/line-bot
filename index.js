@@ -126,7 +126,6 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ===== เก็บ Group IDs =====
-// สามารถใส่จาก Environment ได้ เช่น GROUP_IDS=C123,C456,C789
 const GROUP_IDS = (process.env.GROUP_IDS || "").split(",").filter(id => id.trim());
 
 // ===== ตรวจสอบและบันทึก Group ID จาก webhook =====
