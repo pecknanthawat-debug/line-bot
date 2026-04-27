@@ -93,6 +93,9 @@ app.post("/webhook", async (req, res) => {
     const events = parsed.events || [];
 
     for (const event of events) {
+      // บันทึก Group ID
+      captureGroupId(event);
+      
       if (event.type !== "message" || event.message.type !== "text") continue;
 
       const text = event.message.text.trim();
@@ -122,13 +125,85 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+// ===== เก็บ Group IDs =====
+// สามารถใส่จาก Environment ได้ เช่น GROUP_IDS=C123,C456,C789
+const GROUP_IDS = (process.env.GROUP_IDS || "").split(",").filter(id => id.trim());
+
+// ===== ตรวจสอบและบันทึก Group ID จาก webhook =====
+function captureGroupId(event) {
+  if (event.source?.type === "group" && event.source?.groupId) {
+    const gid = event.source.groupId;
+    if (!GROUP_IDS.includes(gid) && process.env.NODE_ENV !== "production") {
+      console.log(`📌 Found group ID: ${gid}`);
+    }
+  }
+}
+
+// ===== Broadcast endpoint =====
+app.post("/broadcast", express.json(), async (req, res) => {
+  res.status(200).json({ status: "processing" });
+
+  try {
+    const { message, groups } = req.body;
+    if (!message) {
+      console.error("No message provided");
+      return;
+    }
+
+    // กำหนดกลุ่มที่จะส่ง
+    let targetGroups = GROUP_IDS;
+    if (groups && Array.isArray(groups)) {
+      targetGroups = groups.filter(g => GROUP_IDS.includes(g));
+    } else if (groups === "all") {
+      targetGroups = GROUP_IDS;
+    }
+
+    if (targetGroups.length === 0) {
+      console.error("No valid groups found");
+      return;
+    }
+
+    console.log(`📢 Broadcasting to ${targetGroups.length} groups...`);
+
+    // ส่งเข้ากลุ่มทั้งหมด
+    for (const groupId of targetGroups) {
+      await axios.post(
+        `https://api.line.me/v2/bot/message/push`,
+        {
+          to: groupId,
+          messages: [{ type: "text", text: message }],
+        },
+        {
+          headers: { Authorization: `Bearer ${LINE_ACCESS_TOKEN}` },
+        }
+      ).catch(err => {
+        console.error(`Error sending to group ${groupId}:`, err.message);
+      });
+    }
+
+    console.log(`✅ Broadcast complete`);
+  } catch (err) {
+    console.error("Broadcast error:", err.message);
+  }
+});
+
+// ===== API เพื่อดู Group IDs ที่มีอยู่ =====
+app.get("/groups", (req, res) => {
+  res.json({
+    total: GROUP_IDS.length,
+    groups: GROUP_IDS.map((id, i) => ({ id: i + 1, groupId: id })),
+    instruction: "POST to /broadcast with { message: '...', groups: ['groupId1', 'groupId2'] or groups: 'all' }",
+  });
+});
+
 // ===== Health check =====
 app.get("/", (req, res) => {
-  res.json({ status: "ok", shop: SHOP.name });
+  res.json({ status: "ok", shop: SHOP.name, groups: GROUP_IDS.length });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Bot running on port ${PORT}`);
   console.log(`🏪 Shop: ${SHOP.name}`);
+  console.log(`📌 Groups connected: ${GROUP_IDS.length}`);
 });
