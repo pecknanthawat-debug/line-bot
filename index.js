@@ -1,5 +1,4 @@
 const express = require("express");
-const crypto = require("crypto");
 const axios = require("axios");
 const Anthropic = require("@anthropic-ai/sdk");
 
@@ -41,6 +40,7 @@ const QUICK = {
   "สอบถาม": `📞 ${SHOP.contact}`,
 };
 
+// ===== Helper Functions =====
 function getQuick(text) {
   for (const [k, v] of Object.entries(QUICK)) {
     if (text.includes(k)) return v;
@@ -48,7 +48,6 @@ function getQuick(text) {
   return null;
 }
 
-// ===== AI ตอบ =====
 async function aiReply(text, userName) {
   const res = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
@@ -61,7 +60,6 @@ async function aiReply(text, userName) {
   return res.content[0].text;
 }
 
-// ===== ส่งข้อความ LINE =====
 async function sendReply(replyToken, text) {
   await axios.post("https://api.line.me/v2/bot/message/reply", {
     replyToken,
@@ -71,7 +69,6 @@ async function sendReply(replyToken, text) {
   });
 }
 
-// ===== ดึงชื่อผู้ใช้ =====
 async function getName(userId) {
   try {
     const r = await axios.get(`https://api.line.me/v2/bot/profile/${userId}`, {
@@ -81,11 +78,24 @@ async function getName(userId) {
   } catch { return "ลูกค้า"; }
 }
 
+// ===== Setup =====
 app.use(express.json());
+
+// ===== เก็บ Group IDs =====
+const GROUP_IDS = (process.env.GROUP_IDS || "").split(",").filter(id => id.trim());
+
+// ===== ตรวจสอบและบันทึก Group ID จาก webhook =====
+function captureGroupId(event) {
+  if (event.source?.type === "group" && event.source?.groupId) {
+    const gid = event.source.groupId;
+    if (!GROUP_IDS.includes(gid)) {
+      console.log(`📌 Found group ID: ${gid}`);
+    }
+  }
+}
 
 // ===== Webhook =====
 app.post("/webhook", async (req, res) => {
-  // ตอบ 200 ทันทีก่อนเสมอ
   res.status(200).json({ status: "ok" });
 
   try {
@@ -93,7 +103,6 @@ app.post("/webhook", async (req, res) => {
     const events = parsed.events || [];
 
     for (const event of events) {
-      // บันทึก Group ID
       captureGroupId(event);
       
       if (event.type !== "message" || event.message.type !== "text") continue;
@@ -103,7 +112,6 @@ app.post("/webhook", async (req, res) => {
       const userId = event.source?.userId;
       const isGroup = event.source?.type === "group" || event.source?.type === "room";
 
-      const isMentioned = text.includes(`@${BOT_NAME}`) || !isGroup;
       const cleanText = text.replace(`@${BOT_NAME}`, "").trim();
 
       // คำตอบสำเร็จรูป
@@ -113,8 +121,8 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // AI ตอบ (เฉพาะเมื่อ mention หรือ DM)
-      if (isMentioned && cleanText.length > 0) {
+      // AI ตอบ
+      if (cleanText.length > 0) {
         const name = userId ? await getName(userId) : "ลูกค้า";
         const reply = await aiReply(cleanText, name);
         await sendReply(replyToken, reply);
@@ -125,21 +133,8 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// ===== เก็บ Group IDs =====
-const GROUP_IDS = (process.env.GROUP_IDS || "").split(",").filter(id => id.trim());
-
-// ===== ตรวจสอบและบันทึก Group ID จาก webhook =====
-function captureGroupId(event) {
-  if (event.source?.type === "group" && event.source?.groupId) {
-    const gid = event.source.groupId;
-    if (!GROUP_IDS.includes(gid) && process.env.NODE_ENV !== "production") {
-      console.log(`📌 Found group ID: ${gid}`);
-    }
-  }
-}
-
 // ===== Broadcast endpoint =====
-app.post("/broadcast", express.json(), async (req, res) => {
+app.post("/broadcast", async (req, res) => {
   res.status(200).json({ status: "processing" });
 
   try {
@@ -149,7 +144,6 @@ app.post("/broadcast", express.json(), async (req, res) => {
       return;
     }
 
-    // กำหนดกลุ่มที่จะส่ง
     let targetGroups = GROUP_IDS;
     if (groups && Array.isArray(groups)) {
       targetGroups = groups.filter(g => GROUP_IDS.includes(g));
@@ -164,7 +158,6 @@ app.post("/broadcast", express.json(), async (req, res) => {
 
     console.log(`📢 Broadcasting to ${targetGroups.length} groups...`);
 
-    // ส่งเข้ากลุ่มทั้งหมด
     for (const groupId of targetGroups) {
       await axios.post(
         `https://api.line.me/v2/bot/message/push`,
@@ -186,12 +179,11 @@ app.post("/broadcast", express.json(), async (req, res) => {
   }
 });
 
-// ===== API เพื่อดู Group IDs ที่มีอยู่ =====
+// ===== API เพื่อดู Group IDs =====
 app.get("/groups", (req, res) => {
   res.json({
     total: GROUP_IDS.length,
     groups: GROUP_IDS.map((id, i) => ({ id: i + 1, groupId: id })),
-    instruction: "POST to /broadcast with { message: '...', groups: ['groupId1', 'groupId2'] or groups: 'all' }",
   });
 });
 
@@ -200,6 +192,7 @@ app.get("/", (req, res) => {
   res.json({ status: "ok", shop: SHOP.name, groups: GROUP_IDS.length });
 });
 
+// ===== Start server =====
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Bot running on port ${PORT}`);
